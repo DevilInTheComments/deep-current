@@ -230,7 +230,7 @@ function buildShareCard(kind, data) {
       kind: kind,
       heading: t.name,
       section: 'Today · Pisces',
-      dateLine: formatLongDate(data.date),
+      dateLine: formatLongDate(data.date) + ' · Born March 1, 1988',
       blocks: [
         { label: 'Horoscope', text: t.overall },
         { label: 'Love', text: t.love },

@@ -70,6 +70,19 @@ body {
   font-weight: 600;
 }
 
+.top-birthday {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 2px 20px 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--icy);
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+}
+
 .moon-chip {
   display: inline-flex;
   align-items: center;

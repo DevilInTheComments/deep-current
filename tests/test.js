@@ -133,6 +133,7 @@ let card = app.buildShareCard('today', { date: shareDate, theme: shareTheme, num
 check('today card: heading is theme name', card.heading === shareTheme.name, card.heading);
 check('today card: share text has theme + tide label, no %', card.shareText.includes(shareTheme.name) && card.shareText.includes('Cosmic Tide') && card.shareText.includes(shareTheme.tideLabel) && !card.shareText.includes('%'), card.shareText.slice(0, 80));
 check('today card: share text has date + app URL', card.shareText.includes('November 22, 2026') && card.shareText.includes(app.SHARE_URL), card.shareText.slice(0, 120));
+check('today card: share text has birthday', card.shareText.includes('Born March 1, 1988'), card.shareText.slice(0, 120));
 check('today card: lucky block present', card.blocks.some(b => b.label === 'Lucky' && b.text.includes('14 · 56 · 97')));
 
 card = app.buildShareCard('moon', { date: shareDate, moon: shareMoon, meaning: pisces.moonMeanings[shareMoon.phaseKey] });
