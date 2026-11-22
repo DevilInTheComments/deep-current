@@ -152,6 +152,367 @@ function storeSaved(arr) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); } catch (e) { /* storage full/blocked */ }
 }
 
+/* ---------- moon shape (shared by the Moon tab and share cards) ---------- */
+function drawMoonShape(ctx, cx, cy, R, moon) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#101024';
+  ctx.fill();
+  var theta = moon.angleDeg * Math.PI / 180;
+  var waxing = moon.angleDeg < 180;
+  var rx = R * Math.abs(Math.cos(theta));
+  ctx.beginPath();
+  if (waxing) {
+    ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2, false);
+  } else {
+    ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2, true);
+  }
+  var ccw = (Math.cos(theta) < 0) === waxing;
+  ctx.ellipse(cx, cy, Math.max(rx, 0.01), R, 0, Math.PI / 2, Math.PI * 1.5, ccw);
+  ctx.closePath();
+  var grad = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
+  grad.addColorStop(0, '#F5F1DC');
+  grad.addColorStop(1, '#D9D2B8');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(165, 243, 252, 0.25)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+/* ---------- share cards ---------- */
+var SHARE_URL = 'https://devilinthecomments.github.io/deep-current/';
+var CARD_W = 1080;
+var CARD_PAD = 72;
+var CARD_CW = CARD_W - CARD_PAD * 2;
+var CARD_MAX_H = 2600;
+var CARD_FONTS = {
+  brand: '700 26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  date: '26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  title: '700 62px Georgia, "Times New Roman", serif',
+  glyph: '64px Georgia, "Times New Roman", serif',
+  label: '700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  body: '30px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  sub: '28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  footer: '24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+};
+
+/* Wrap text to lines that fit maxWidth. measureFn(text) -> px width. */
+function wrapText(measureFn, text, maxWidth) {
+  var out = [];
+  String(text).split('\n').forEach(function (para) {
+    var words = para.split(/\s+/).filter(function (w) { return w.length > 0; });
+    if (!words.length) { out.push(''); return; }
+    var line = '';
+    words.forEach(function (w) {
+      var test = line ? line + ' ' + w : w;
+      if (measureFn(test) <= maxWidth || !line) { line = test; }
+      else { out.push(line); line = w; }
+    });
+    if (line) out.push(line);
+  });
+  return out;
+}
+
+/* Build the share content for one tab (or one frozen saved day).
+ * kind: 'today' | 'moon' | 'pisces' | 'matches' | 'you' | 'saved'.
+ * Returns { kind, heading, section, dateLine, blocks, moon?, shareText }
+ * or null for an unknown kind. No percentages anywhere except real moon
+ * illumination (calculated astronomy, already shown in the app); Matches is
+ * prose-only and Cosmic Tide is always 1–5 + label, never a percent. */
+function buildShareCard(kind, data) {
+  var card = null;
+  if (kind === 'today') {
+    var t = data.theme, m = data.moon;
+    card = {
+      kind: kind,
+      heading: t.name,
+      section: 'Today · Pisces',
+      dateLine: formatLongDate(data.date),
+      blocks: [
+        { label: 'Horoscope', text: t.overall },
+        { label: 'Love', text: t.love },
+        { label: 'Focus', text: t.focus },
+        { label: 'Cosmic Tide', text: 'Tide ' + t.tide + ' of 5 — ' + t.tideLabel, tide: t.tide },
+        { label: 'Lucky', text: data.numbers.join(' · ') + ' · ' + t.luckyColor },
+        { label: 'Affirmation', text: '\u201C' + t.affirmation + '\u201D' }
+      ],
+      moon: m
+    };
+  } else if (kind === 'moon') {
+    var mm = data.moon;
+    card = {
+      kind: kind,
+      heading: mm.phaseName,
+      section: 'Moon · Pisces',
+      dateLine: formatLongDate(data.date),
+      blocks: [
+        { label: 'Illumination', text: Math.round(mm.illumination * 100) + '% lit · approximate · moon age ' + (Math.round(mm.age * 10) / 10) + ' days' },
+        { label: 'Next full moon', text: formatShortDate(mm.nextFullDate) + ' · in ' + Math.round(mm.daysToFull) + ' days · approximate' },
+        { label: 'Next new moon', text: formatShortDate(mm.nextNewDate) + ' · in ' + Math.round(mm.daysToNew) + ' days · approximate' },
+        { label: 'What this means for Pisces', text: data.meaning || '' }
+      ],
+      moon: mm
+    };
+  } else if (kind === 'pisces') {
+    var s = data.sign;
+    card = {
+      kind: kind,
+      heading: 'Pisces',
+      section: 'Pisces · The Two Fish',
+      dateLine: s.dates + ' · ' + s.element + ' · Ruled by ' + s.ruler,
+      blocks: [{ label: 'Sign', text: 'Dates ' + s.dates + ' · Element ' + s.element + ' · Ruler ' + s.ruler + ' · Symbol ' + s.symbol }]
+        .concat(s.strengths.map(function (x) { return { label: x.title, text: x.text }; }))
+    };
+  } else if (kind === 'matches') {
+    var sg = data.sign;
+    var best = ['Cancer', 'Scorpio', 'Taurus'];
+    card = {
+      kind: kind,
+      heading: 'Matches',
+      section: 'Pisces · Compatibility',
+      dateLine: 'Compatibility is a starting point, not a verdict.',
+      blocks: best.map(function (n) {
+        var d = sg.compatibility[n.toLowerCase()];
+        return { label: n, text: d.read, sub: d.why };
+      })
+    };
+  } else if (kind === 'you') {
+    var saved = (data.saved || []).slice().sort(function (a, b) { return b.date.localeCompare(a.date); });
+    var savedText;
+    if (saved.length) {
+      var shown = saved.slice(0, 8);
+      savedText = shown.map(function (x) { return x.themeName + ' — ' + x.date + ' · ' + x.moonPhaseName; }).join('\n');
+      if (saved.length > shown.length) savedText += '\n…and ' + (saved.length - shown.length) + ' more saved days';
+    } else {
+      savedText = 'No days saved yet. Tap \u201CSave this day\u201D on the Today tab to keep a day exactly as it was.';
+    }
+    card = {
+      kind: kind,
+      heading: 'You · Pisces',
+      section: 'Your sign',
+      dateLine: 'March 1, 1988 · Sun in Pisces',
+      blocks: [
+        { label: 'Your sign', text: data.profileRead },
+        { label: 'Saved days', text: savedText }
+      ]
+    };
+  } else if (kind === 'saved') {
+    var snap = data.snapshot;
+    card = {
+      kind: kind,
+      heading: snap.themeName,
+      section: 'Saved day · Pisces',
+      dateLine: snap.date + ' · as saved',
+      blocks: [
+        { label: 'Horoscope', text: snap.overall },
+        { label: 'Love', text: snap.love },
+        { label: 'Focus', text: snap.focus },
+        { label: 'Theme mood', text: snap.mood },
+        { label: 'Cosmic Tide', text: 'Tide ' + snap.tide + ' of 5 — ' + snap.tideLabel, tide: snap.tide },
+        { label: 'Moon', text: snap.moonPhaseName + ' · ' + snap.moonIllumination + '% lit · approximate · moon age ' + snap.moonAge + ' days' },
+        { label: 'Lucky', text: snap.luckyNumbers.join(' · ') + ' · ' + snap.luckyColor },
+        { label: 'Affirmation', text: '\u201C' + snap.affirmation + '\u201D' }
+      ]
+    };
+  }
+  if (!card) return null;
+  card.blocks = card.blocks.filter(function (b) { return b.text && String(b.text).trim().length > 0; });
+  card.title = 'Deep Current — Pisces';
+  card.shareText = shareTextFromCard(card);
+  return card;
+}
+
+function shareTextFromCard(card) {
+  var lines = [];
+  lines.push(card.heading + ' — Deep Current · Pisces');
+  lines.push(card.dateLine);
+  lines.push('');
+  card.blocks.forEach(function (b) {
+    lines.push(b.label);
+    lines.push(b.text);
+    if (b.sub) lines.push(b.sub);
+    lines.push('');
+  });
+  lines.push('Deep Current — Pisces · ' + SHARE_URL);
+  return lines.join('\n');
+}
+
+function cardContentHeight(titleLines, blocks) {
+  var h = 64 + 30 + 26 + 116 + 22 + 30 + 26 + titleLines.length * 74 + 40;
+  blocks.forEach(function (b) {
+    h += 30 + 10 + b.lines.length * 46;
+    if (b.subLines.length) h += 8 + b.subLines.length * 42;
+    if (b.tide) h += 26;
+    h += 34;
+  });
+  h += 36 + 24 + 64;
+  return h;
+}
+
+/* Measure + wrap every block and compute the canvas height.
+ * measure(text, fontCss) -> px width. Height is capped at CARD_MAX_H by
+ * trimming lines (then whole blocks) from the end. */
+function layoutShareCard(measure, card, width) {
+  var w = width || CARD_W;
+  var cw = w - CARD_PAD * 2;
+  var titleLines = wrapText(function (t) { return measure(t, CARD_FONTS.title); }, card.heading, cw);
+  var blocks = card.blocks.map(function (b) {
+    return {
+      label: b.label,
+      lines: wrapText(function (t) { return measure(t, CARD_FONTS.body); }, b.text, cw),
+      subLines: b.sub ? wrapText(function (t) { return measure(t, CARD_FONTS.sub); }, b.sub, cw) : [],
+      tide: b.tide || 0
+    };
+  });
+  while (cardContentHeight(titleLines, blocks) > CARD_MAX_H) {
+    var last = blocks[blocks.length - 1];
+    if (!last) break;
+    if (last.subLines.length) { last.subLines.pop(); }
+    else if (last.lines.length > 1) {
+      last.lines.pop();
+      var li = last.lines[last.lines.length - 1];
+      if (li.slice(-1) !== '\u2026') last.lines[last.lines.length - 1] = li + ' \u2026';
+    } else { blocks.pop(); }
+  }
+  return { width: w, height: cardContentHeight(titleLines, blocks), titleLines: titleLines, blocks: blocks };
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  if (w <= 0) return;
+  r = Math.min(r, h / 2, w / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* Draw the share card on canvas and return a PNG data URL. */
+function renderShareCard(canvas, card) {
+  var ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d context');
+  function measure(text, font) { ctx.font = font; return ctx.measureText(text).width; }
+  var L = layoutShareCard(measure, card, CARD_W);
+  canvas.width = L.width;
+  canvas.height = L.height;
+  var W = L.width, H = L.height;
+  // Background: deep space + violet glow + a sprinkle of stars.
+  ctx.fillStyle = '#06060F';
+  ctx.fillRect(0, 0, W, H);
+  var bg = ctx.createRadialGradient(W / 2, 0, 0, W / 2, 0, 700);
+  bg.addColorStop(0, 'rgba(109, 40, 217, 0.28)');
+  bg.addColorStop(1, 'rgba(6, 6, 15, 0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  var seed = 1234567 + card.heading.length * 97;
+  function srand() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+  for (var i = 0; i < 26; i++) {
+    ctx.globalAlpha = 0.15 + srand() * 0.45;
+    ctx.fillStyle = '#CFE9FF';
+    ctx.beginPath();
+    ctx.arc(srand() * W, srand() * H, 1 + srand() * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var y = 64;
+  ctx.fillStyle = '#2DD4BF';
+  ctx.font = CARD_FONTS.brand;
+  ctx.fillText('DEEP CURRENT — PISCES', W / 2, y + 15);
+  y += 30 + 26;
+  var glyphCy = y + 58;
+  ctx.beginPath();
+  ctx.arc(W / 2, glyphCy, 58, 0, Math.PI * 2);
+  var cg = ctx.createRadialGradient(W / 2, glyphCy - 20, 10, W / 2, glyphCy, 58);
+  cg.addColorStop(0, 'rgba(109, 40, 217, 0.55)');
+  cg.addColorStop(1, 'rgba(6, 6, 15, 0.2)');
+  ctx.fillStyle = cg;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(212, 175, 55, 0.55)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  if (card.kind === 'moon' && card.moon) {
+    drawMoonShape(ctx, W / 2, glyphCy, 50, card.moon);
+  } else {
+    ctx.fillStyle = '#D4AF37';
+    ctx.font = CARD_FONTS.glyph;
+    ctx.fillText('\u2653', W / 2, glyphCy + 2);
+  }
+  y += 116 + 22;
+  ctx.fillStyle = '#A5F3FC';
+  ctx.font = CARD_FONTS.date;
+  ctx.fillText(card.dateLine, W / 2, y + 15);
+  y += 30 + 26;
+  ctx.fillStyle = '#F3F1FA';
+  ctx.font = CARD_FONTS.title;
+  L.titleLines.forEach(function (ln) { ctx.fillText(ln, W / 2, y + 37); y += 74; });
+  y += 20;
+  ctx.strokeStyle = 'rgba(212, 175, 55, 0.6)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 40, y);
+  ctx.lineTo(W / 2 + 40, y);
+  ctx.stroke();
+  y += 20;
+
+  ctx.textAlign = 'left';
+  L.blocks.forEach(function (b) {
+    ctx.fillStyle = '#2DD4BF';
+    ctx.font = CARD_FONTS.label;
+    ctx.fillText(b.label.toUpperCase(), CARD_PAD, y + 15);
+    y += 30 + 10;
+    ctx.fillStyle = '#F3F1FA';
+    ctx.font = CARD_FONTS.body;
+    b.lines.forEach(function (ln) { ctx.fillText(ln, CARD_PAD, y + 23); y += 46; });
+    if (b.subLines.length) {
+      y += 8;
+      ctx.fillStyle = '#A5F3FC';
+      ctx.font = CARD_FONTS.sub;
+      b.subLines.forEach(function (ln) { ctx.fillText(ln, CARD_PAD, y + 21); y += 42; });
+    }
+    if (b.tide) {
+      y += 14;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.09)';
+      roundRectPath(ctx, CARD_PAD, y, CARD_CW, 12, 6);
+      ctx.fill();
+      var tg = ctx.createLinearGradient(CARD_PAD, 0, CARD_PAD + CARD_CW, 0);
+      tg.addColorStop(0, '#6D28D9');
+      tg.addColorStop(1, '#2DD4BF');
+      ctx.fillStyle = tg;
+      roundRectPath(ctx, CARD_PAD, y, CARD_CW * (b.tide / 5), 12, 6);
+      ctx.fill();
+      y += 12;
+    }
+    y += 34;
+  });
+  y += 36;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#8B86A3';
+  ctx.font = CARD_FONTS.footer;
+  ctx.fillText('Deep Current — Pisces · devilinthecomments.github.io/deep-current', W / 2, y + 12);
+  return canvas.toDataURL('image/png');
+}
+
+/* True when the native share sheet can take a PNG file. `nav` is
+ * navigator-like; injectable for tests. */
+function supportsFileShare(nav) {
+  if (!nav || typeof nav.share !== 'function') return false;
+  if (typeof nav.canShare !== 'function') return true;
+  try {
+    var f = (typeof File === 'function')
+      ? new File(['x'], 'x.png', { type: 'image/png' })
+      : { name: 'x.png', type: 'image/png' };
+    return !!nav.canShare({ files: [f] });
+  } catch (e) { return false; }
+}
+
 /* ---------- exports for node tests ---------- */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -159,7 +520,12 @@ if (typeof module !== 'undefined' && module.exports) {
     compactDateKey: compactDateKey, selectTheme: selectTheme,
     luckyNumbers: luckyNumbers, moonInfo: moonInfo, PHASES: PHASES,
     buildSnapshot: buildSnapshot, SYNODIC_DAYS: SYNODIC_DAYS,
-    REF_NEW_MOON_UNIX: REF_NEW_MOON_UNIX
+    REF_NEW_MOON_UNIX: REF_NEW_MOON_UNIX,
+    buildShareCard: buildShareCard, shareTextFromCard: shareTextFromCard,
+    wrapText: wrapText, layoutShareCard: layoutShareCard,
+    renderShareCard: renderShareCard, supportsFileShare: supportsFileShare,
+    CARD_W: CARD_W, CARD_MAX_H: CARD_MAX_H, SHARE_URL: SHARE_URL,
+    formatShortDate: formatShortDate, formatLongDate: formatLongDate
   };
 }
 
@@ -230,37 +596,8 @@ if (typeof document !== 'undefined') (function () {
     var ctx = canvas.getContext('2d');
     if (!ctx) return;
     var size = canvas.width;
-    var cx = size / 2, cy = size / 2, R = size / 2 - 14;
     ctx.clearRect(0, 0, size, size);
-    // dark disc
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.fillStyle = '#101024';
-    ctx.fill();
-    // lit region: outer arc on lit side + elliptical terminator
-    var theta = moon.angleDeg * Math.PI / 180;
-    var waxing = moon.angleDeg < 180;
-    var rx = R * Math.abs(Math.cos(theta));
-    ctx.beginPath();
-    if (waxing) {
-      ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2, false);
-    } else {
-      ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2, true);
-    }
-    var ccw = (Math.cos(theta) < 0) === waxing;
-    ctx.ellipse(cx, cy, Math.max(rx, 0.01), R, 0, Math.PI / 2, Math.PI * 1.5, ccw);
-    ctx.closePath();
-    var grad = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
-    grad.addColorStop(0, '#F5F1DC');
-    grad.addColorStop(1, '#D9D2B8');
-    ctx.fillStyle = grad;
-    ctx.fill();
-    // soft limb
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(165, 243, 252, 0.25)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    drawMoonShape(ctx, size / 2, size / 2, size / 2 - 14, moon);
   }
 
   function renderMoon() {
@@ -347,9 +684,14 @@ if (typeof document !== 'undefined') (function () {
       '<article class="card"><div class="card-kicker">Cosmic Tide</div><p>' + escapeHtml(s.tideLabel) + '</p></article>' +
       '<article class="card"><div class="card-kicker">Lucky</div><p>' + escapeHtml(s.luckyNumbers.join(' · ')) + ' · ' + escapeHtml(s.luckyColor) + '</p></article>' +
       '<article class="card affirm"><div class="card-kicker">Affirmation</div><p style="font-family: Georgia, serif; font-size: 20px;">\u201C' + escapeHtml(s.affirmation) + '\u201D</p></article>' +
+      '<button class="share-btn sheet-share" id="sheet-share-btn" type="button">Share this day</button>' +
       '<button class="save-btn sheet-delete" id="sheet-delete-btn" type="button">Delete this saved day</button>';
     $('sheet').hidden = false;
     $('sheet-backdrop').hidden = false;
+    $('sheet-share-btn').addEventListener('click', function () {
+      var card = buildShareCard('saved', { snapshot: s });
+      if (card) shareCard(card, 'deep-current-saved-' + s.date);
+    });
     $('sheet-delete-btn').addEventListener('click', function () {
       var all = loadSaved();
       var keep = all.filter(function (x) { return !(x.date === s.date && x.savedAt === s.savedAt); });
@@ -390,6 +732,89 @@ if (typeof document !== 'undefined') (function () {
     ta.select();
     try { document.execCommand('copy'); } catch (e) { /* noop */ }
     document.body.removeChild(ta);
+  }
+
+  /* ---------- share ---------- */
+  function downloadBlob(blob, name) {
+    try {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    } catch (e) { /* download unavailable; text copy still happens below */ }
+  }
+
+  function downloadDataUrl(dataUrl, name) {
+    var a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  /* Share one card. Native share sheet with the PNG when the device can
+   * take files (iPhone Safari does); otherwise save the PNG and copy the
+   * text so the user can post it to Facebook themselves. The app never
+   * posts anywhere on its own. */
+  function shareCard(card, fileBase) {
+    var canvas = document.createElement('canvas');
+    var dataUrl;
+    try { dataUrl = renderShareCard(canvas, card); }
+    catch (e) { toast('Sharing is not available right now.'); return; }
+    var fileName = fileBase + '.png';
+    function fallback(blob) {
+      if (blob) downloadBlob(blob, fileName);
+      else downloadDataUrl(dataUrl, fileName);
+      copyText(card.shareText, 'Image saved — text copied. Post it to Facebook yourself.');
+    }
+    function withBlob(fn) {
+      if (canvas.toBlob) { canvas.toBlob(function (b) { fn(b); }, 'image/png'); }
+      else fn(null);
+    }
+    if (supportsFileShare(navigator)) {
+      withBlob(function (blob) {
+        if (!blob) { fallback(null); return; }
+        var file;
+        try { file = new File([blob], fileName, { type: 'image/png' }); }
+        catch (e) { fallback(blob); return; }
+        var p;
+        try { p = navigator.share({ title: 'Deep Current — Pisces', text: card.shareText, files: [file] }); }
+        catch (e) { fallback(blob); return; }
+        if (p && p.then) {
+          p.then(function () { toast('Shared.'); }, function (err) {
+            if (err && err.name === 'AbortError') return; // user dismissed the sheet
+            fallback(blob);
+          });
+        }
+      });
+    } else {
+      withBlob(function (blob) { fallback(blob); });
+    }
+  }
+
+  function shareFileName(kind) {
+    return 'deep-current-' + kind + '-' + localDateKey(currentDate);
+  }
+
+  function shareTab(kind) {
+    var card = null;
+    if (kind === 'today') {
+      card = buildShareCard('today', { date: currentReading.date, theme: currentReading.theme, numbers: currentReading.numbers, moon: currentReading.moon });
+    } else if (kind === 'moon') {
+      card = buildShareCard('moon', { date: currentReading.date, moon: currentReading.moon, meaning: signData.moonMeanings[currentReading.moon.phaseKey] });
+    } else if (kind === 'pisces') {
+      card = buildShareCard('pisces', { sign: signData });
+    } else if (kind === 'matches') {
+      card = buildShareCard('matches', { sign: signData });
+    } else if (kind === 'you') {
+      card = buildShareCard('you', { date: currentReading.date, profileRead: signData.profile.read, saved: loadSaved() });
+    }
+    if (!card) return;
+    shareCard(card, shareFileName(kind));
   }
 
   function switchTab(name) {
@@ -495,6 +920,11 @@ if (typeof document !== 'undefined') (function () {
         renderSaved();
         toast('Day saved — frozen as it is.');
       });
+      $('share-today-btn').addEventListener('click', function () { shareTab('today'); });
+      $('share-moon-btn').addEventListener('click', function () { shareTab('moon'); });
+      $('share-pisces-btn').addEventListener('click', function () { shareTab('pisces'); });
+      $('share-matches-btn').addEventListener('click', function () { shareTab('matches'); });
+      $('share-you-btn').addEventListener('click', function () { shareTab('you'); });
       $('clear-saved-btn').addEventListener('click', function () {
         storeSaved([]);
         renderSaved();

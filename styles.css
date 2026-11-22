@@ -278,6 +278,23 @@ body {
   cursor: default;
 }
 
+.share-btn {
+  display: block;
+  width: 100%;
+  margin: 10px 0 8px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  background: rgba(109, 40, 217, 0.14);
+  color: var(--violet-soft);
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.share-btn.sheet-share { margin-top: 12px; }
+
 .honesty {
   text-align: center;
   color: var(--faint);
